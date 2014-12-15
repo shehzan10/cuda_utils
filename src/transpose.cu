@@ -9,8 +9,8 @@
 #include <nvToolsExt.h>
 
 //Initialize sizes
-const int rows = 4096;
-const int cols = 4096;
+const int sizeX = 4096;
+const int sizeY = 4096;
 const int BLOCK_SIZE_X = 32;
 const int BLOCK_SIZE_Y = 32;
 
@@ -81,10 +81,10 @@ void preprocess(float *res, float *dev_res, int n)
 __global__ void copyKernel(const float* __restrict__ const a,
         float* __restrict__ const b)
 {
-    int i = blockIdx.y * blockDim.y + threadIdx.y;  // row
-    int j = blockIdx.x * blockDim.x + threadIdx.x;  // col
+    int i = blockIdx.x * blockDim.x + threadIdx.x;  //
+    int j = blockIdx.y * blockDim.y + threadIdx.y;  //
 
-    int index_in = i*cols+j;   // (i,j) from matrix A
+    int index_in = j * sizeX + i;   // (i,j) from matrix A
 
     b[index_in] = a[index_in];
 }
@@ -94,11 +94,11 @@ __global__ void matrixTransposeNaive(const float* __restrict__ const a,
 {
     //HINT: Look at copyKernel above
 
-    int i = blockIdx.y * blockDim.y + threadIdx.y;  // row
-    int j = blockIdx.x * blockDim.x + threadIdx.x;  // col
+    int i = blockIdx.x * blockDim.x + threadIdx.x;  //
+    int j = blockIdx.y * blockDim.y + threadIdx.y;  //
 
-    int index_in  =  i*cols+j;      // Compute input index (i,j) from matrix A
-    int index_out =  j*rows+i;      // Compute output index (j,i) in matrix B = transpose(A)
+    int index_in  = j * sizeX + i;      // Compute input index (i,j) from matrix A
+    int index_out = i * sizeY + j;      // Compute output index (j,i) in matrix B = transpose(A)
 
     // Copy data from A to B
     b[index_out] = a[index_in];
@@ -108,52 +108,51 @@ __global__ void matrixTransposeShared(const float* __restrict__ const a,
         float* __restrict__ const b)
 {
     //Allocate appropriate shared memory
-    __shared__ float mat[BLOCK_SIZE_X][BLOCK_SIZE_Y];
+    __shared__ float mat[BLOCK_SIZE_Y][BLOCK_SIZE_X];
 
     //Compute input and output index
     int bx = blockIdx.x * BLOCK_SIZE_X;
     int by = blockIdx.y * BLOCK_SIZE_Y;
-    int i  = by + threadIdx.y;        // row
-    int j  = bx + threadIdx.x;        // col
-    int ti = bx + threadIdx.y;        // row
-    int tj = by + threadIdx.x;        // col
+    int i  = bx + threadIdx.x;        //
+    int j  = by + threadIdx.y;        //
+    int ti = by + threadIdx.x;        //
+    int tj = bx + threadIdx.y;        //
 
     //Copy data from input to shared memory
-    if(i < rows && j < cols)
-            mat[threadIdx.x][threadIdx.y] = a[i * cols + j];
+    if(i < sizeX && j < sizeY)
+            mat[threadIdx.y][threadIdx.x] = a[j * sizeX + i];
 
     __syncthreads();
 
     //Copy data from shared memory to global memory
-    if(tj < cols && ti < rows)
-            b[ti * rows + tj] = mat[threadIdx.y][threadIdx.x];
+    if(ti < sizeY && tj < sizeX)
+            b[tj * sizeY + ti] = mat[threadIdx.x][threadIdx.y];
 }
 
 __global__ void matrixTransposeSharedwBC(const float* __restrict__ const a,
         float* __restrict__ const b)
 {
     //HINT: Copy code from matrixTransposeShared kernel, while solving bank conflict problem
-    __shared__ float mat[BLOCK_SIZE_X][BLOCK_SIZE_Y + 1];
-
     //Allocate appropriate shared memory
+    __shared__ float mat[BLOCK_SIZE_Y][BLOCK_SIZE_X + 1];
 
     //Compute input and output index
     int bx = blockIdx.x * BLOCK_SIZE_X;
     int by = blockIdx.y * BLOCK_SIZE_Y;
-    int i  = by + threadIdx.y;        // row
-    int j  = bx + threadIdx.x;        // col
-    int ti = bx + threadIdx.y;        // row
-    int tj = by + threadIdx.x;        // col
+    int i  = bx + threadIdx.x;        //
+    int j  = by + threadIdx.y;        //
+    int ti = by + threadIdx.x;        //
+    int tj = bx + threadIdx.y;        //
 
     //Copy data from input to shared memory
-    if(i < rows && j < cols)
-            mat[threadIdx.x][threadIdx.y] = a[i * cols + j];
+    if(i < sizeX && j < sizeY)
+            mat[threadIdx.y][threadIdx.x] = a[j * sizeX + i];
 
     __syncthreads();
 
     //Copy data from shared memory to global memory
-    if(tj < cols && ti < rows)
-            b[ti * rows + tj] = mat[threadIdx.y][threadIdx.x];
+    if(ti < sizeY && tj < sizeX)
+            b[tj * sizeY + ti] = mat[threadIdx.x][threadIdx.y];
 }
 
 __global__ void matrixTransposeUnrolled(const float* __restrict__ const a,
@@ -170,8 +169,8 @@ __global__ void matrixTransposeUnrolled(const float* __restrict__ const a,
     #pragma unroll
     for(int k = 0; k < TILE ; k += SIDE)
     {
-            if(x < rows && y + k < cols)
-                    mat[threadIdx.y + k][threadIdx.x] = a[((y + k) * rows) + x];
+            if(x < sizeX && y + k < sizeY)
+                    mat[threadIdx.y + k][threadIdx.x] = a[((y + k) * sizeX) + x];
     }
 
     __syncthreads();
@@ -183,8 +182,8 @@ __global__ void matrixTransposeUnrolled(const float* __restrict__ const a,
     #pragma unroll
     for(int k = 0; k < TILE; k += SIDE)
     {
-            if(x < cols && y + k < rows)
-                    b[(y + k) * cols + x] = mat[threadIdx.x][threadIdx.y + k];
+            if(x < sizeY && y + k < sizeX)
+                    b[(y + k) * sizeY + x] = mat[threadIdx.x][threadIdx.y + k];
     }
 }
 
@@ -200,35 +199,35 @@ int main(int argc, char *argv[])
     nvtxRangeEnd(cudaBenchmark);
 
     // Host arrays.
-    float* a = new float[rows*cols];
-    float* b = new float[rows*cols];
-    float* a_gold = new float[rows*cols];
-    float* b_gold = new float[rows*cols];
+    float* a      = new float[sizeX * sizeY];
+    float* b      = new float[sizeX * sizeY];
+    float* a_gold = new float[sizeX * sizeY];
+    float* b_gold = new float[sizeX * sizeY];
 
     // Device arrays
     float *d_a, *d_b;
 
     // Allocate memory on the device
-    CUDA( cudaMalloc((void **) &d_a, rows*cols*sizeof(float)) );
+    CUDA(cudaMalloc((void **) &d_a, sizeX * sizeY * sizeof(float)));
 
-    CUDA( cudaMalloc((void **) &d_b, rows*cols*sizeof(float)) );
+    CUDA(cudaMalloc((void **) &d_b, sizeX * sizeY * sizeof(float)));
 
     // Fill matrix A
-    for (int i = 0; i < rows * cols; i++)
+    for (int i = 0; i < sizeX * sizeY; i++)
         a[i] = (float)i;
 
     cout << endl;
 
     // Copy array contents of A from the host (CPU) to the device (GPU)
-    cudaMemcpy(d_a, a, rows*cols*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_a, a, sizeX * sizeY * sizeof(float), cudaMemcpyHostToDevice);
 
     //Compute "gold" reference standard
-    for(int ii = 0; ii < rows; ii++)
+    for(int jj = 0; jj < sizeY; jj++)
     {
-        for(int jj = 0; jj < cols; jj++)
+        for(int ii = 0; ii < sizeX; ii++)
         {
-            a_gold[jj * rows + ii] = a[jj * cols + ii];
-            b_gold[ii * cols + jj] = a[jj * cols + ii];
+            a_gold[jj * sizeX + ii] = a[jj * sizeX + ii];
+            b_gold[ii * sizeY + jj] = a[jj * sizeX + ii];
         }
     }
 
@@ -254,9 +253,9 @@ int main(int argc, char *argv[])
         int iters = 10;
         for (int k=0; k<iters; k++)
         {
-            for(int ii = 0; ii < rows; ii++)
-                for(int jj = 0; jj < cols; jj++)
-                    b[ii * cols + jj] = a[jj * cols + ii];
+            for(int jj = 0; jj < sizeY; jj++)
+                for(int ii = 0; ii < sizeX; ii++)
+                    b[ii * sizeX + jj] = a[jj * sizeX + ii];
         }
         // stop the timer
         clock_t end = clock();
@@ -266,7 +265,7 @@ int main(int argc, char *argv[])
         time = diffclock(end, begin);
 
         // print out the time required for the kernel to finish the transpose operation
-        double Bandwidth = (double)iters*2.0*1000.0*(double)(rows*cols*sizeof(float)) / (1000.0*1000.0*1000.0*time);
+        double Bandwidth = (double)iters*2.0*1000.0*(double)(sizeX * sizeY*sizeof(float)) / (1000.0*1000.0*1000.0*time);
         cout << "Elapsed Time for " << iters << " runs = " << time << "ms" << endl;
         cout << "Bandwidth (GB/s) = " << Bandwidth << endl;
     }
@@ -279,16 +278,15 @@ int main(int argc, char *argv[])
     cout << "******************************************" << endl;
     cout << "***Device To Device Copy***" << endl;
     {
-        preprocess(b, d_b, rows*cols);
+        preprocess(b, d_b, sizeX * sizeY);
         // Assign a 2D distribution of BS_X x BS_Y x 1 CUDA threads within
         // Calculate number of blocks along X and Y in a 2D CUDA "grid"
 
         DIMS dims;
         dims.dimBlock = dim3(BLOCK_SIZE_X, BLOCK_SIZE_Y, 1);
-        dims.dimGrid  = dim3(divup(rows, BLOCK_SIZE_X),
-                             divup(cols, BLOCK_SIZE_Y),
-                             1
-                             );
+        dims.dimGrid  = dim3(divup(sizeX, BLOCK_SIZE_X),
+                             divup(sizeY, BLOCK_SIZE_Y),
+                             1);
 
         // start the timer
         nvtxRangeId_t naiveBenchmark = nvtxRangeStart("Device to Device Copy");
@@ -309,15 +307,15 @@ int main(int argc, char *argv[])
         cudaEventElapsedTime( &time, start, stop);
 
         // print out the time required for the kernel to finish the transpose operation
-        double Bandwidth = (double)iters*2.0*1000.0*(double)(rows*cols*sizeof(float)) /
+        double Bandwidth = (double)iters*2.0*1000.0*(double)(sizeX * sizeY*sizeof(float)) /
                             (1000.0*1000.0*1000.0*time);        //2.0 for read of A and read and write of B
         cout << "Elapsed Time for " << iters << " runs = " << time << "ms" << endl;
         cout << "Bandwidth (GB/s) = " << Bandwidth << endl;
 
         // copy the answer back to the host (CPU) from the device (GPU)
-        cudaMemcpy(b, d_b, cols*rows*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(b, d_b, sizeY*sizeX*sizeof(float), cudaMemcpyDeviceToHost);
 
-        postprocess(a_gold, b, rows * cols);
+        postprocess(a_gold, b, sizeX * sizeY);
     }
     cout << "******************************************" << endl;
     cout << endl;
@@ -328,14 +326,14 @@ int main(int argc, char *argv[])
     cout << "******************************************" << endl;
     cout << "***Naive Transpose***" << endl;
     {
-        preprocess(b, d_b, rows*cols);
+        preprocess(b, d_b, sizeX * sizeY);
         // Assign a 2D distribution of BS_X x BS_Y x 1 CUDA threads within
         // Calculate number of blocks along X and Y in a 2D CUDA "grid"
         // HINT: Look above for copy kernel dims computation
         DIMS dims;
         dims.dimBlock = dim3(BLOCK_SIZE_X, BLOCK_SIZE_Y, 1);
-        dims.dimGrid  = dim3(divup(rows, BLOCK_SIZE_X),
-                             divup(cols, BLOCK_SIZE_Y),
+        dims.dimGrid  = dim3(divup(sizeX, BLOCK_SIZE_X),
+                             divup(sizeY, BLOCK_SIZE_Y),
                              1);
 
         // start the timer
@@ -357,15 +355,15 @@ int main(int argc, char *argv[])
         cudaEventElapsedTime( &time, start, stop);
 
         // print out the time required for the kernel to finish the transpose operation
-        double Bandwidth = (double)iters*2.0*1000.0*(double)(rows*cols*sizeof(float)) /
+        double Bandwidth = (double)iters*2.0*1000.0*(double)(sizeX * sizeY*sizeof(float)) /
             (1000.0*1000.0*1000.0*time);
         cout << "Elapsed Time for " << iters << " runs = " << time << "ms" << endl;
         cout << "Bandwidth (GB/s) = " << Bandwidth << endl;
 
         // copy the answer back to the host (CPU) from the device (GPU)
-        cudaMemcpy(b, d_b, cols*rows*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(b, d_b, sizeY*sizeX*sizeof(float), cudaMemcpyDeviceToHost);
 
-        postprocess(b_gold, b, rows * cols);
+        postprocess(b_gold, b, sizeX * sizeY);
     }
     cout << "******************************************" << endl;
     cout << endl;
@@ -377,13 +375,13 @@ int main(int argc, char *argv[])
     cout << "******************************************" << endl;
     cout << "***Shared Memory Transpose***" << endl;
     {
-        preprocess(b, d_b, rows*cols);
+        preprocess(b, d_b, sizeX * sizeY);
         // Assign a 2D distribution of BS_X x BS_Y x 1 CUDA threads within
         // Calculate number of blocks along X and Y in a 2D CUDA "grid"
         DIMS dims;
         dims.dimBlock = dim3(BLOCK_SIZE_X, BLOCK_SIZE_Y, 1);
-        dims.dimGrid  = dim3(divup(rows, BLOCK_SIZE_X),
-                             divup(cols, BLOCK_SIZE_Y),
+        dims.dimGrid  = dim3(divup(sizeX, BLOCK_SIZE_X),
+                             divup(sizeY, BLOCK_SIZE_Y),
                              1);
 
         // start the timer
@@ -405,15 +403,15 @@ int main(int argc, char *argv[])
         cudaEventElapsedTime( &time, start, stop);
 
         // print out the time required for the kernel to finish the transpose operation
-        double Bandwidth = (double)iters*2.0*1000.0*(double)(rows*cols*sizeof(float)) /
+        double Bandwidth = (double)iters*2.0*1000.0*(double)(sizeX * sizeY*sizeof(float)) /
             (1000.0*1000.0*1000.0*time);
         cout << "Elapsed Time for " << iters << " runs = " << time << "ms" << endl;
         cout << "Bandwidth (GB/s) = " << Bandwidth << endl;
 
         // copy the answer back to the host (CPU) from the device (GPU)
-        cudaMemcpy(b, d_b, cols*rows*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(b, d_b, sizeY*sizeX*sizeof(float), cudaMemcpyDeviceToHost);
 
-        postprocess(b_gold, b, rows * cols);
+        postprocess(b_gold, b, sizeX * sizeY);
     }
     cout << "******************************************" << endl;
     cout << endl;
@@ -425,13 +423,13 @@ int main(int argc, char *argv[])
     cout << "******************************************" << endl;
     cout << "***Without Bank Conflicts Transpose***" << endl;
     {
-        preprocess(b, d_b, rows*cols);
+        preprocess(b, d_b, sizeX * sizeY);
         // Assign a 2D distribution of BS_X x BS_Y x 1 CUDA threads within
         // Calculate number of blocks along X and Y in a 2D CUDA "grid"
         DIMS dims;
         dims.dimBlock = dim3(BLOCK_SIZE_X, BLOCK_SIZE_Y, 1);
-        dims.dimGrid  = dim3(divup(rows, BLOCK_SIZE_X),
-                             divup(cols, BLOCK_SIZE_Y),
+        dims.dimGrid  = dim3(divup(sizeX, BLOCK_SIZE_X),
+                             divup(sizeY, BLOCK_SIZE_Y),
                              1);
 
         // start the timer
@@ -453,15 +451,15 @@ int main(int argc, char *argv[])
         cudaEventElapsedTime( &time, start, stop);
 
         // print out the time required for the kernel to finish the transpose operation
-        double Bandwidth = (double)iters*2.0*1000.0*(double)(rows*cols*sizeof(float)) /
+        double Bandwidth = (double)iters*2.0*1000.0*(double)(sizeX * sizeY*sizeof(float)) /
             (1000.0*1000.0*1000.0*time);
         cout << "Elapsed Time for " << iters << " runs = " << time << "ms" << endl;
         cout << "Bandwidth (GB/s) = " << Bandwidth << endl;
 
         // copy the answer back to the host (CPU) from the device (GPU)
-        cudaMemcpy(b, d_b, cols*rows*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(b, d_b, sizeY*sizeX*sizeof(float), cudaMemcpyDeviceToHost);
 
-        postprocess(b_gold, b, rows * cols);
+        postprocess(b_gold, b, sizeX * sizeY);
     }
     cout << "******************************************" << endl;
     cout << endl;
@@ -473,13 +471,13 @@ int main(int argc, char *argv[])
     cout << "******************************************" << endl;
     cout << "***Unrolled Loops Transpose***" << endl;
     {
-        preprocess(b, d_b, rows*cols);
+        preprocess(b, d_b, sizeX * sizeY);
         // Assign a 2D distribution of TILE x SIDE x 1 CUDA threads within
         // Calculate number of blocks along X and Y in a 2D CUDA "grid"
         DIMS dims;
         dims.dimBlock = dim3(TILE, SIDE, 1);
-        dims.dimGrid  = dim3(divup(rows, TILE),
-                             divup(cols, TILE),
+        dims.dimGrid  = dim3(divup(sizeX, TILE),
+                             divup(sizeY, TILE),
                              1);
 
         // start the timer
@@ -501,15 +499,15 @@ int main(int argc, char *argv[])
         cudaEventElapsedTime( &time, start, stop);
 
         // print out the time required for the kernel to finish the transpose operation
-        double Bandwidth = (double)iters*2.0*1000.0*(double)(rows*cols*sizeof(float)) /
+        double Bandwidth = (double)iters*2.0*1000.0*(double)(sizeX * sizeY*sizeof(float)) /
             (1000.0*1000.0*1000.0*time);
         cout << "Elapsed Time for " << iters << " runs = " << time << "ms" << endl;
         cout << "Bandwidth (GB/s) = " << Bandwidth << endl;
 
         // copy the answer back to the host (CPU) from the device (GPU)
-        cudaMemcpy(b, d_b, cols*rows*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(b, d_b, sizeY*sizeX*sizeof(float), cudaMemcpyDeviceToHost);
 
-        postprocess(b_gold, b, rows * cols);
+        postprocess(b_gold, b, sizeX * sizeY);
     }
     cout << "******************************************" << endl;
     cout << endl;
@@ -524,7 +522,7 @@ int main(int argc, char *argv[])
        }
        cout << endl;
        for (int i = 0; i < 32; i++) {
-       cout << b[i * cols] << " ";
+       cout << b[i * sizeY] << " ";
        }
        cout << endl;
 
