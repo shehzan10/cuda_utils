@@ -187,6 +187,21 @@ __global__ void matrixTransposeUnrolled(const float* __restrict__ const a,
     }
 }
 
+__global__ void copyKernelUnrolled(const float* __restrict__ const a,
+        float* __restrict__ const b)
+{
+    int i = blockIdx.x * TILE + threadIdx.x;  //
+    int j = blockIdx.y * TILE + threadIdx.y;  //
+
+    #pragma unroll
+    for(int k = 0; k < TILE ; k += SIDE)
+    {
+        int index_in = (j + k) * sizeX + i;   // (i,j) from matrix A
+        b[index_in] = a[index_in];
+    }
+}
+
+
 int main(int argc, char *argv[])
 {
     //Run Memcpy benchmarks
@@ -513,6 +528,53 @@ int main(int argc, char *argv[])
     cout << endl;
     ////////////////////////////////////////////////////////////
 #endif
+
+    ////////////////////////////////////////////////////////////
+    cout << "******************************************" << endl;
+    cout << "***Device To Device Copy Unrolled***" << endl;
+    {
+        preprocess(b, d_b, sizeX * sizeY);
+        // Assign a 2D distribution of TILE x SIDE x 1 CUDA threads within
+        // Calculate number of blocks along X and Y in a 2D CUDA "grid"
+        DIMS dims;
+        dims.dimBlock = dim3(TILE, SIDE, 1);
+        dims.dimGrid  = dim3(divup(sizeX, TILE),
+                             divup(sizeY, TILE),
+                             1);
+
+        // start the timer
+        nvtxRangeId_t copyBenchmarkUnrolled = nvtxRangeStart("Device to Device Copy Unrolled");
+        cudaEventRecord( start, 0);
+
+        int iters = 10;
+        for (int i=0; i<iters; i++)
+        {
+            // Launch the GPU kernel
+            copyKernelUnrolled<<<dims.dimGrid, dims.dimBlock>>>(d_a, d_b);
+        }
+        // stop the timer
+        cudaEventRecord( stop, 0);
+        cudaEventSynchronize( stop );
+        nvtxRangeEnd(copyBenchmarkUnrolled);
+
+        float time = 0.0f;
+        cudaEventElapsedTime( &time, start, stop);
+
+        // print out the time required for the kernel to finish the transpose operation
+        double Bandwidth = (double)iters*2.0*1000.0*(double)(sizeX * sizeY*sizeof(float)) /
+                            (1000.0*1000.0*1000.0*time);        //2.0 for read of A and read and write of B
+        cout << "Elapsed Time for " << iters << " runs = " << time << "ms" << endl;
+        cout << "Bandwidth (GB/s) = " << Bandwidth << endl;
+
+        // copy the answer back to the host (CPU) from the device (GPU)
+        cudaMemcpy(b, d_b, sizeY*sizeX*sizeof(float), cudaMemcpyDeviceToHost);
+
+        postprocess(a_gold, b, sizeX * sizeY);
+    }
+    cout << "******************************************" << endl;
+    cout << endl;
+    ////////////////////////////////////////////////////////////
+
     // copy the answer back to the host (CPU) from the device (GPU)
 
     /*
