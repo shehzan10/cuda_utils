@@ -2,6 +2,7 @@
 # Local
 #################
 cudaDeviceProp
+build*
 
 #################
 ## Eclipse
