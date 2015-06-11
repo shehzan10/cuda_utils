@@ -8,6 +8,8 @@
 //NVTX Dir: C:\Program Files\NVIDIA GPU Computing Toolkit\nvToolsExt
 #include <nvToolsExt.h>
 
+#include "memBenchmark.h"
+
 //Initialize sizes
 const int sizeX = 4096;
 const int sizeY = 4096;
@@ -210,11 +212,7 @@ int main(int argc, char *argv[])
 
     //Run Memcpy benchmarks
     nvtxRangeId_t cudaBenchmark = nvtxRangeStart("CUDA Memcpy Benchmark");
-#if defined WIN64
-    system(".\\..\\bin\\cudaBenchmark.exe");
-#elif defined LINUX
-    system("./bin/cudaBenchmark");
-#endif
+    memBenchmark();
     nvtxRangeEnd(cudaBenchmark);
 
     // Set mapping

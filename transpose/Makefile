@@ -28,9 +28,9 @@ else
 endif
 
 
-all: bin/cudaBenchmark bin/transpose bin/transpose0
+all: bin/memBenchmark bin/transpose bin/transpose0
 
-bin/cudaBenchmark: src/cudaBenchmark.cu
+bin/memBenchmark: src/memBenchmark.cu
 	$(NVCC) $(NVCCFLAGS) $(LIBRARIES) $(INCLUDES) $(DEFINES)  $< -o $@
 
 bin/transpose: src/transpose.cu
@@ -44,5 +44,5 @@ clean:
 	@echo "Cleaning..."
 	@-rm bin/transpose
 	@-rm bin/transpose0
-	@-rm bin/cudaBenchmark
+	@-rm bin/memBenchmark
 	@echo "Complete!"
