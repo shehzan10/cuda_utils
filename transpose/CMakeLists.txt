@@ -21,11 +21,25 @@ FILE(GLOB SOURCES
 )
 
 FIND_LIBRARY(CUDA_nvToolsExt_LIBRARY
-    NAMES "nvToolsExt"
-    PATH_SUFFIXES "lib64" "lib" "lib/x64" "lib/Win32"
-    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    DOC "CUDA NV Tools Ext Library"
+	NAMES "nvToolsExt" "nvToolsExt64_1"
+	PATH_SUFFIXES "lib64" "lib" "lib/x64" "lib/Win32"
+	PATHS ${CUDA_TOOLKIT_ROOT_DIR}
+		$ENV{NVTOOLSEXT_PATH}
+	DOC "CUDA NV Tools Ext Library"
+	)
+IF(WIN32)
+	FIND_PATH(
+        CUDA_nvToolsExt_INCLUDE
+        NAMES "nvToolsExt.h"
+        PATHS $ENV{NVTOOLSEXT_PATH}
+        PATH_SUFFIXES "include"
+        DOC "NV Tools Ext Include Directory"
+        NO_DEFAULT_PATH
     )
+	INCLUDE_DIRECTORIES(
+		${CUDA_nvToolsExt_INCLUDE}
+    )
+ENDIF(WIN32)
 
 LIST(APPEND CMAKE_CXX_FLAGS "-O3 -Wall")
 
@@ -40,4 +54,10 @@ FOREACH(FILENAME ${SOURCES})
     STRING(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "" EXEC ${EXEC})
     CUDA_ADD_EXECUTABLE(${EXEC} ${FILENAME})
     TARGET_LINK_LIBRARIES(${EXEC} ${CUDA_nvToolsExt_LIBRARY})
+	IF(WIN32)
+		ADD_CUSTOM_COMMAND(TARGET ${EXEC}
+			POST_BUILD
+			COMMAND copy ARGS "\"$ENV{NVTOOLSEXT_PATH}bin\\x64\\nvToolsExt64_1.dll\" \"${PROJECT_BINARY_DIR}/\$\(Configuration\)/\""
+			COMMENT "Running SomeCommand")
+	ENDIF(WIN32)
 ENDFOREACH()
